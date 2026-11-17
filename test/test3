@@ -1,0 +1,18 @@
+import polars as pl
+
+field = pl.read_csv("output/field_power.csv")
+labels = pl.read_csv("output/ramp_labels.csv")
+
+# 选一个窗口长度，和build_dataset.py里面保持一致，假设seq_len=12
+seq_len = 12
+# 随便挑一个样本起点
+start_idx = 100
+end_idx = start_idx + seq_len
+predict_t = end_idx
+
+print(f"窗口输入：t_idx {start_idx} ~ {end_idx -1}（一共{seq_len}条历史）")
+print("输入窗口对应的时间：")
+print(field.filter(pl.col("t_idx").is_between(start_idx, end_idx-1)).select(["t_idx","Day","step","Wspd_mean"]))
+
+print(f"\n要预测的标签是 t_idx = {predict_t} 的dir：")
+print(labels.filter(pl.col("t_idx") == predict_t).select(["t_idx","dir"]))

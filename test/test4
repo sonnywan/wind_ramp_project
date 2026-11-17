@@ -1,0 +1,13 @@
+import polars as pl
+
+field = pl.read_csv("output/field_power.csv")
+train_data = field.filter(pl.col("t_idx") < 24624)
+
+# 拿你build_dataset里面用到的特征列，这里举例子，你对照里面的特征
+feat_cols = ["Wspd_mean", "cap_avail_kw", "P_mw"]
+
+print("===== 只用训练集计算的均值、标准差 =====")
+for col in feat_cols:
+    mean_val = train_data[col].mean()
+    std_val = train_data[col].std()
+    print(f"{col}: mean={mean_val:.4f}, std={std_val:.4f}")

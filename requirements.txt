@@ -1,0 +1,9 @@
+# 风电功率爬坡预警系统
+# 运行 Streamlit 前端：streamlit run code/app.py
+streamlit>=1.32
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+lightgbm>=4.0
+scikit-learn>=1.3
+joblib>=1.3

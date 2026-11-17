@@ -1,0 +1,11 @@
+import polars as pl
+
+labels = pl.read_csv("output/ramp_labels.csv")
+
+print("===== split 分组数量 =====")
+print(labels["split"].value_counts())
+
+print("\n===== 每组的 t_idx 起止 =====")
+for sp in labels["split"].unique():
+    sub_df = labels.filter(pl.col("split") == sp)
+    print(f"{sp}: 起始t_idx = {sub_df['t_idx'].min()}, 结束t_idx = {sub_df['t_idx'].max()}")

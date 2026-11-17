@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>风电爬坡预警系统 · 仪表盘</title>
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- ECharts 5（本地优先，离线可用；缺失时回退 CDN） -->
+  <script src="echarts.min.js"></script>
+  <script>
+    if (typeof echarts === 'undefined') {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"><\/script>');
+    }
+  </script>
+  <style>
+    body { background:#f5f7fa; }
+    .card { box-shadow:0 1px 4px rgba(0,0,0,.08); border:none; }
+    .stat-num { font-size:1.8rem; font-weight:700; }
+    #chart-power { width:100%; height:420px; }
+    #chart-prob  { width:100%; height:220px; }
+    .badge-up   { background:#d62728; }
+    .badge-down { background:#1f77b4; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-dark mb-3">
+  <div class="container-fluid">
+    <span class="navbar-brand mb-0 h1">⚡ 风电功率爬坡预警系统 · 可视化仪表盘</span>
+    <div class="d-flex gap-2 align-items-center">
+      <label class="text-white small mb-0">API:</label>
+      <input id="apiBase" class="form-control form-control-sm" style="width:220px"
+             value="http://127.0.0.1:8000">
+      <button class="btn btn-sm btn-primary" onclick="loadAll()">加载</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid">
+  <!-- 指标卡 -->
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3"><div class="card p-3 text-center">
+      <div class="text-muted small">告警总数</div>
+      <div class="stat-num" id="stat-total">-</div></div></div>
+    <div class="col-6 col-md-3"><div class="card p-3 text-center">
+      <div class="text-muted small">命中告警</div>
+      <div class="stat-num text-success" id="stat-hit">-</div></div></div>
+    <div class="col-6 col-md-3"><div class="card p-3 text-center">
+      <div class="text-muted small">命中率</div>
+      <div class="stat-num text-primary" id="stat-rate">-</div></div></div>
+    <div class="col-6 col-md-3"><div class="card p-3 text-center">
+      <div class="text-muted small">概率源</div>
+      <div class="stat-num" id="stat-src">-</div></div></div>
+  </div>
+
+  <!-- 传感器/手动输入 → 后端判断 → LED 闭环 -->
+  <div class="card mb-3 border-primary"><div class="card-body">
+    <h6 class="card-title">🔌 传感器输入 / 手动录入 → 后端判断 → LED 预警</h6>
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">风速 (m/s)</label>
+        <input id="in-wspd" type="number" step="0.1" class="form-control form-control-sm" value="8.0">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">功率 (MW，可空)</label>
+        <input id="in-pmw" type="number" step="1" class="form-control form-control-sm" placeholder="自动由风速曲线"
+        >
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">风速硬阈值 (m/s)</label>
+        <input id="in-wthr" type="number" step="0.5" class="form-control form-control-sm" value="12.0">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small mb-0">模型阈值 τ</label>
+        <input id="in-tau" type="number" step="0.05" class="form-control form-control-sm" value="0.30">
+      </div>
+      <div class="col-6 col-md-2">
+        <button class="btn btn-primary btn-sm w-100" onclick="submitSensor()">提交判断</button>
+      </div>
+      <div class="col-6 col-md-2">
+        <button class="btn btn-outline-secondary btn-sm w-100" onclick="simulateSensor()">传感器模拟</button>
+      </div>
+    </div>
+    <hr class="my-2">
+    <div class="row g-3 align-items-center">
+      <div class="col-auto">
+        <div id="led" style="width:56px;height:56px;border-radius:50%;background:#444;
+             box-shadow:inset 0 0 8px #000;transition:all .2s"></div>
+      </div>
+      <div class="col">
+        <div id="led-label" class="fw-bold">LED：未触发</div>
+        <div id="result-line" class="text-muted small">等待提交…</div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- 功率 + 事件 + 概率曲线 -->
+  <div class="card mb-3"><div class="card-body">
+    <h6 class="card-title">场站功率时序 / 爬坡事件 / 预警概率</h6>
+    <div id="chart-power"></div>
+  </div></div>
+
+  <!-- 概率单独放大 -->
+  <div class="card mb-3"><div class="card-body">
+    <h6 class="card-title">上下行超阈概率（p_up / p_dn）</h6>
+    <div id="chart-prob"></div>
+  </div></div>
+
+  <!-- 告警历史表 -->
+  <div class="card mb-4"><div class="card-body">
+    <h6 class="card-title">历史告警查询</h6>
+    <div class="table-responsive" style="max-height:320px;overflow:auto">
+      <table class="table table-sm table-hover">
+        <thead class="table-light sticky-top"><tr>
+          <th>ID</th><th>t_start</th><th>t_end</th><th>方向</th><th>等级</th>
+          <th>τ</th><th>命中事件</th><th>是否命中</th><th>提前量(步)</th>
+        </tr></thead>
+        <tbody id="alarm-body"><tr><td colspan="9" class="text-center text-muted">点击"加载"获取数据</td></tr></tbody>
+      </table>
+    </div>
+  </div></div>
+</div>
+
+<script>
+let chartPower, chartProb;
+let eventMark = null, alarmMarks = [];
+
+// ---------- 传感器输入 → 后端判断 → LED ----------
+async function submitSensor() {
+  const base = document.getElementById('apiBase').value.replace(/\/$/, '');
+  const wspd = parseFloat(document.getElementById('in-wspd').value);
+  const pmwRaw = document.getElementById('in-pmw').value.trim();
+  const wthr = parseFloat(document.getElementById('in-wthr').value) || 12.0;
+  const tau = parseFloat(document.getElementById('in-tau').value) || 0.30;
+  if (isNaN(wspd)) { alert('请输入有效风速'); return; }
+  const body = { wspd, wind_thr: wthr, tau, led: true, save: true };
+  if (pmwRaw !== '') body.p_mw = parseFloat(pmwRaw);
+  setLed(false, '判断中…', '');
+  try {
+    const r = await fetch(base + '/predict_manual', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    renderDecision(d);
+  } catch (e) {
+    setLed(false, '请求失败', e.message + '（确认后端已启动 & 跨域）');
+  }
+}
+
+async function simulateSensor() {
+  // 传感器模拟：在 [4, 16] m/s 内随机出一个风速并提交
+  const w = (4 + Math.random() * 12).toFixed(1);
+  document.getElementById('in-wspd').value = w;
+  document.getElementById('in-pmw').value = '';
+  await submitSensor();
+}
+
+function setLed(on, label, line) {
+  const led = document.getElementById('led');
+  if (on) {
+    led.style.background = '#e53935';
+    led.style.boxShadow = '0 0 18px 6px rgba(229,57,53,.8)';
+  } else {
+    led.style.background = '#444';
+    led.style.boxShadow = 'inset 0 0 8px #000';
+  }
+  document.getElementById('led-label').innerText = label;
+  if (line !== undefined) document.getElementById('result-line').innerText = line;
+}
+
+function renderDecision(d) {
+  const dec = d.decision, pred = d.pred;
+  const on = dec.is_alarm;
+  let label = on ? `🔴 LED 亮：${dec.direction === 'up' ? '上爬坡' : '下爬坡'}预警（等级 ${dec.level}）`
+                 : '⚫ LED 灭：无预警';
+  const hw = d.led.real_hardware ? '（真实串口已下发）' : '（虚拟 LED，未接硬件）';
+  setLed(on, label + ' ' + hw, '');
+  const byMap = {model: '模型判定', wind: '风速硬阈值', none: '无'};
+  const line = `输入风速 ${d.input.wspd} m/s → P̂=${pred.P_hat} MW, ΔP̂=${pred.dP_hat} MW, `
+    + `p_up=${pred.p_up}, p_dn=${pred.p_dn}；触发源：${byMap[dec.by] || dec.by}；`
+    + (d.alarm_id ? `已入库 alarm_id=${d.alarm_id}` : '未入库');
+  document.getElementById('result-line').innerText = line;
+}
+
+function initCharts() {
+  chartPower = echarts.init(document.getElementById('chart-power'));
+  chartProb  = echarts.init(document.getElementById('chart-prob'));
+  window.addEventListener('resize', () => { chartPower.resize(); chartProb.resize(); });
+}
+
+async function jget(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + ' -> ' + r.status);
+  return await r.json();
+}
+
+async function loadAll() {
+  const base = document.getElementById('apiBase').value.replace(/\/$/, '');
+  try {
+    const [meta, summary, ts, prob, events, alarms] = await Promise.all([
+      jget(base + '/meta'),
+      jget(base + '/alarm_summary'),
+      jget(base + '/timeseries?t0=29952&t1=35279'),
+      jget(base + '/prob?t0=29952&t1=35279'),
+      jget(base + '/events?main_only=true'),
+      jget(base + '/alarms?limit=200'),
+    ]);
+
+    document.getElementById('stat-total').innerText = summary.total_alarms;
+    document.getElementById('stat-hit').innerText   = summary.hit_alarms;
+    document.getElementById('stat-rate').innerText  = (summary.hit_rate*100).toFixed(1) + '%';
+    document.getElementById('stat-src').innerText   = (meta.prob_source||'-').toUpperCase();
+
+    renderPower(ts, prob, events);
+    renderProb(prob);
+    renderAlarms(alarms);
+  } catch (e) {
+    alert('加载失败：' + e.message + '\n请确认后端已启动（python code/api_server.py）且允许跨域。');
+  }
+}
+
+function renderPower(ts, prob, events) {
+  const t = ts.map(d => d.t_idx);
+  const p = ts.map(d => d.p_mw);
+  const w = ts.map(d => d.wspd_mean);
+  const pu = prob.map(d => d.p_up);
+
+  // 事件区间标注（用 markArea）
+  const evAreas = (events||[]).slice(0,80).map(e => ([{
+    name: '事件'+e.event_id,
+    xAxis: e.start_tidx,
+    itemStyle:{color: e.direction==='up' ? 'rgba(214,39,40,.10)' : 'rgba(31,119,180,.10)'}
+  }, { xAxis: e.start_tidx + 6 }]));
+
+  chartPower.setOption({
+    tooltip:{trigger:'axis'},
+    legend:{data:['功率(MW)','风速(m/s)','p_up']},
+    grid:{left:60,right:60,top:40,bottom:50},
+    xAxis:{type:'category',data:t, name:'t_idx'},
+    yAxis:[
+      {type:'value',name:'功率/风速',scale:true},
+      {type:'value',name:'概率',min:0,max:1}
+    ],
+    dataZoom:[{type:'inside'},{type:'slider',height:18,bottom:8}],
+    series:[
+      {name:'功率(MW)',type:'line',data:p,showSymbol:false,smooth:true,lineStyle:{width:1.4},color:'#2ca02c',
+       markArea:{silent:true,data:evAreas}},
+      {name:'风速(m/s)',type:'line',data:w,showSymbol:false,smooth:true,lineStyle:{width:1},color:'#ff7f0e'},
+      {name:'p_up',type:'line',yAxisIndex:1,data:pu,showSymbol:false,lineStyle:{width:1,type:'dashed'},color:'#d62728'}
+    ]
+  });
+}
+
+function renderProb(prob) {
+  const t = prob.map(d => d.t_idx);
+  chartProb.setOption({
+    tooltip:{trigger:'axis'},
+    legend:{data:['p_up','p_dn']},
+    grid:{left:50,right:20,top:30,bottom:40},
+    xAxis:{type:'category',data:t, name:'t_idx'},
+    yAxis:{type:'value',min:0,max:1,name:'概率'},
+    dataZoom:[{type:'inside'},{type:'slider',height:14,bottom:6}],
+    series:[
+      {name:'p_up',type:'line',data:prob.map(d=>d.p_up),showSymbol:false,color:'#d62728'},
+      {name:'p_dn',type:'line',data:prob.map(d=>d.p_dn),showSymbol:false,color:'#1f77b4'}
+    ]
+  });
+}
+
+function renderAlarms(alarms) {
+  const body = document.getElementById('alarm-body');
+  if (!alarms.length) { body.innerHTML = '<tr><td colspan="9" class="text-center text-muted">无告警记录</td></tr>'; return; }
+  body.innerHTML = alarms.map(a => {
+    const dirBadge = a.direction === 'up'
+      ? '<span class="badge badge-up">上爬坡</span>'
+      : '<span class="badge badge-down">下爬坡</span>';
+    const hit = a.is_hit ? '<span class="text-success">✓</span>' : '<span class="text-muted">✗</span>';
+    return `<tr>
+      <td>${a.alarm_id}</td><td>${a.t_start}</td><td>${a.t_end}</td>
+      <td>${dirBadge}</td><td>${a.level}</td><td>${a.tau}</td>
+      <td>${a.matched_event_id ?? '-'}</td><td>${hit}</td><td>${a.lead_steps ?? '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+initCharts();
+</script>
+</body>
+</html>
