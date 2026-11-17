@@ -10,22 +10,30 @@ import pandas as pd
 import streamlit as st
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
 import matplotlib.font_manager as fm
 
-# ---------- 中文字体（防乱码）----------
-plt.rcParams["axes.unicode_minus"] = False
-# 自动寻找系统可用的中文字体
+# ============================================================
+# 先注册字体（必须在 import pyplot 之前，否则 rcParams 拿不到）
+# ============================================================
+_FONT_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_PACKAGED_FONT = os.path.join(_FONT_ASSETS, "NotoSansCJKsc-Regular.otf")
 _cn_fonts = []
+
+if os.path.exists(_PACKAGED_FONT):
+    fm.fontManager.addfont(_PACKAGED_FONT)
+    _packaged_name = fm.FontProperties(fname=_PACKAGED_FONT).get_name()
+    _cn_fonts.append(_packaged_name)
+
+# 补充系统可能有的中文字体
 for f in fm.fontManager.ttflist:
-    if any(k in f.name for k in ("YaHei", "Microsoft Ya", "SimHei", "SimSun", "KaiTi", "Noto Sans CJK", "WenQuanYi")):
+    if any(k in f.name for k in ("YaHei", "Microsoft Ya", "SimHei", "SimSun", "KaiTi",
+                                  "Noto Sans CJK", "WenQuanYi", "Source Han Sans")):
         if f.name not in _cn_fonts:
             _cn_fonts.append(f.name)
-if _cn_fonts:
-    plt.rcParams["font.sans-serif"] = _cn_fonts + ["DejaVu Sans"]
-else:
-    plt.rcParams["font.sans-serif"] = ["DejaVu Sans"]
+
+import matplotlib.pyplot as plt
+plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams["font.sans-serif"] = (_cn_fonts + ["DejaVu Sans"]) if _cn_fonts else ["DejaVu Sans"]
 
 # ---------- 统一配色（风电主题）----------
 C_POWER    = "#2563eb"   # 功率曲线：风电蓝
